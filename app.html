@@ -112,6 +112,54 @@
       color: white;
     }
 
+    .analysis-layout {
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+}
+
+/* LEFT PANEL */
+.left-panel {
+  flex: 1.1;
+}
+
+.upload-zone {
+  position: relative;
+}
+
+#removeVideoBtn {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+}
+
+
+.video-preview {
+  display: none;
+}
+
+.video-preview video {
+  width: 100%;
+  border-radius: 20px;
+  background: black;
+}
+
+/* RIGHT PANEL */
+.right-panel {
+  flex: 0.9;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* MOBILE RESPONSIVE */
+@media (max-width: 900px) {
+  .analysis-layout {
+    flex-direction: column;
+  }
+}
+
+
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -123,6 +171,7 @@
       display: none;
     }
 
+    
     .progress.active { display: block; }
 
     .bar {
@@ -167,11 +216,40 @@
   <!-- VIDEO SECTION -->
   <h2 class="section-title">Analyse your video</h2>
 
-  <div id="videoUploadZone" class="upload-zone">
-    <p><strong>Drop your video here</strong></p>
-    <p style="opacity:0.6"></p>
-    <input type="file" id="videoInput" accept="video/*" hidden>
+  <div class="analysis-layout">
+
+  <!-- LEFT: VIDEO PREVIEW -->
+  <div class="right-panel">
+    <div id="videoPreview" class="video-preview">
+      <video id="videoPlayer" controls playsinline></video>
+    </div>
   </div>
+
+  <!-- RIGHT: CONTROLS -->
+  <div class="left-panel">
+
+    <div id="videoUploadZone" class="upload-zone">
+      <span id="uploadText"><strong>Drop your video here</strong></span>
+      <button id="removeVideoBtn" class="close-btn" style="display:none;">&times;</button>
+      <input type="file" id="videoInput" accept="video/*" hidden>
+    </div>
+
+
+    <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
+      Reveal Video
+    </button>
+
+    <div id="videoProgress" class="progress">
+      <p>Analyzing video…</p>
+      <div style="background:#111827;border-radius:999px;">
+        <div id="videoProgressBar" class="bar"></div>
+      </div>
+    </div>
+
+    <div id="videoResults" class="results"></div>
+
+  </div>
+</div>
 
   <div id="videoFileInfo" class="file-info">
     <span id="videoFileName"></span>
@@ -180,10 +258,12 @@
     </button>
   </div>
 
+  <div id="videoPreview" style="display:none; margin-top: 30px; text-align:center;">
+    <video id="videoPlayer" controls playsinline
+          style="width:100%; max-width:700px; border-radius:20px;">
+    </video>
+  </div>
 
-  <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
-    Reveal Video
-  </button>
 
   <div id="videoProgress" class="progress">
     <p>Analyzing video…</p>
@@ -230,16 +310,40 @@ function handleVideo(file) {
     alert("Invalid video file");
     return;
   }
+
   videoFile = file;
-  document.getElementById("videoFileName").innerText = file.name;
-  document.getElementById("videoFileInfo").classList.add("active");
+
+  // Update upload box text
+  document.getElementById("uploadText").innerText = file.name;
+  document.getElementById("removeVideoBtn").style.display = "block";
+
+  // Show video preview
+  const videoPlayer = document.getElementById("videoPlayer");
+  const videoPreview = document.querySelector(".video-preview");
+
+  const videoURL = URL.createObjectURL(file);
+  videoPlayer.src = videoURL;
+  videoPreview.style.display = "block";
+  videoPlayer.load();
+  videoPlayer.play();
+
   videoAnalyzeBtn.disabled = false;
 }
 
 function resetVideo() {
   videoFile = null;
   videoInput.value = "";
-  document.getElementById("videoFileInfo").classList.remove("active");
+
+  // Restore upload box
+  document.getElementById("uploadText").innerHTML = "<strong>Drop your video here</strong>";
+  document.getElementById("removeVideoBtn").style.display = "none";
+
+  // Hide video preview
+  const videoPlayer = document.getElementById("videoPlayer");
+  videoPlayer.pause();
+  videoPlayer.src = "";
+  document.querySelector(".video-preview").style.display = "none";
+
   videoAnalyzeBtn.disabled = true;
 }
 

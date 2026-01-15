@@ -11,8 +11,19 @@ import cv2
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-# ================== FASTAPI ==================
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 app = FastAPI()
+
+# Serve static files (HTML, CSS, JS)
+app.mount("/static", StaticFiles(directory="../"), name="static")
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse("../index.html")
+
+# ================== FASTAPI ==================
 
 app.add_middleware(
     CORSMiddleware,

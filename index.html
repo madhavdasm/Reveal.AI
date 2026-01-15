@@ -9,7 +9,7 @@
     /* LOAD MOONTIME FONT */
     @font-face {
       font-family: "Moontime";
-      src: url("MoonTime-Regular.otf") format("opentype");
+      src: url("/static/MoonTime-Regular.otf") format("opentype");
     }
 
     * {
@@ -29,7 +29,7 @@
     .landing {
       height: 100vh;
       width: 100%;
-      background: url("background.png") no-repeat center center / cover;
+      background: url("/static/background.png") no-repeat center center / cover;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -40,7 +40,10 @@
       text-align: center;
       animation: fadeIn 1.5s ease-in-out;
       z-index: 2;
+      
     }
+
+    
 
     /* TEXT */
     .title {
@@ -134,7 +137,7 @@
 
     // navigate after white screen
     setTimeout(() => {
-      window.location.href = "app.html";
+      window.location.href = "/static/app.html";
     }, 1900);
   });
 </script>
