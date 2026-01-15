@@ -14,7 +14,7 @@
     body {
       min-height: 100vh;
       font-family: 'Outfit', sans-serif;
-      background: #1e073c;
+      background: #1E073C;
       color: #eaeaea;
       display: flex;
       justify-content: center;
@@ -44,6 +44,27 @@
       opacity: 0.8;
       margin-bottom: 48px;
       font-size: 30px;
+    }
+    
+    .close-btn {
+      background: none;
+      border: none;
+      color: #eaeaea;
+      font-size: 28px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 10px;
+      line-height: 1;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .close-btn:hover {
+      transform: scale(1.2);
+      opacity: 0.8;
+    }
+
+    .close-btn:focus {
+      outline: none;
     }
 
     .section-title {
@@ -143,21 +164,22 @@
     <img src="Reveal.AI text.png" alt="REVEAL.AI Logo" class="logo">
   </div>
 
-  <p class="subtitle">AI Video Authenticity Detection</p>
-
   <!-- VIDEO SECTION -->
-  <h2 class="section-title">🎥 Video Analysis</h2>
+  <h2 class="section-title">Analyse your video</h2>
 
   <div id="videoUploadZone" class="upload-zone">
     <p><strong>Drop your video here</strong></p>
-    <p style="opacity:0.6">MP4 / MOV / AVI</p>
+    <p style="opacity:0.6"></p>
     <input type="file" id="videoInput" accept="video/*" hidden>
   </div>
 
   <div id="videoFileInfo" class="file-info">
     <span id="videoFileName"></span>
-    <button onclick="resetVideo()">Remove</button>
+    <button class="close-btn" onclick="resetVideo()" aria-label="Remove file">
+      &times;
+    </button>
   </div>
+
 
   <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
     Reveal Video
