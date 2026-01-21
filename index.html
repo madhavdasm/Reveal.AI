@@ -1,4 +1,4 @@
-<!doctype html>
+<!--<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -43,7 +43,36 @@
       
     }
 
-    
+    .action-buttons {
+  margin-top: 24px;
+  display: flex;
+  gap: 16px;
+}
+
+.action-buttons button {
+  flex: 1;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+#cancelVideoBtn {
+  background: #7f1d1d;
+  color: white;
+}
+
+#uploadNewBtn {
+  background: #1e40af;
+  color: white;
+}
+
+.action-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 
     /* TEXT */
     .title {
@@ -115,7 +144,7 @@
       </div>
     </div>
 
-    <!-- WHITE SCREEN -->
+     WHITE SCREEN
     <div id="whiteScreen" class="white-screen"></div>
   </div>
 
@@ -141,5 +170,191 @@
     }, 1900);
   });
 </script>
+</body>
+</html> -->
+
+<!--Clean Code starts from here-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reveal.AI – Video Analysis</title>
+
+  <style>
+    body {
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #1e073c;
+      color: #eaeaea;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      padding: 20px;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: 28px;
+      margin-bottom: 24px;
+    }
+
+    /* UPLOAD ZONE */
+    .upload-zone {
+      border: 3px dashed #3282b8;
+      border-radius: 20px;
+      padding: 60px 40px;
+      text-align: center;
+      cursor: pointer;
+      background: #16213e;
+      transition: 0.3s;
+    }
+
+    .upload-zone.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .upload-zone:hover:not(.disabled) {
+      transform: translateY(-3px);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    /* VIDEO PREVIEW */
+    .video-preview {
+      margin-top: 24px;
+      display: none;
+    }
+
+    .video-preview video {
+      width: 100%;
+      border-radius: 16px;
+    }
+
+    /* BUTTONS */
+    .buttons {
+      margin-top: 24px;
+      display: flex;
+      gap: 16px;
+    }
+
+    .buttons button {
+      flex: 1;
+      padding: 16px;
+      font-size: 18px;
+      font-weight: 600;
+      border-radius: 16px;
+      border: none;
+      cursor: pointer;
+    }
+
+    #revealBtn {
+      background: #0f4c75;
+      color: white;
+    }
+
+    #revealBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #cancelBtn {
+      background: #7f1d1d;
+      color: white;
+    }
+
+    #cancelBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    <h2 class="section-title">Analyse your video</h2>
+
+    <!-- UPLOAD ZONE -->
+    <div id="uploadZone" class="upload-zone">
+      <p><strong>Drop your video here</strong></p>
+      <input type="file" id="videoInput" accept="video/*" />
+    </div>
+
+    <!-- VIDEO PREVIEW -->
+    <div id="videoPreview" class="video-preview">
+      <video id="videoPlayer" controls></video>
+    </div>
+
+    <!-- ACTION BUTTONS -->
+    <div class="buttons">
+      <button id="cancelBtn" disabled>Cancel Video</button>
+      <button id="revealBtn" disabled>Reveal Video</button>
+    </div>
+
+  </div>
+
+<script>
+  const uploadZone = document.getElementById("uploadZone");
+  const videoInput = document.getElementById("videoInput");
+  const videoPreview = document.getElementById("videoPreview");
+  const videoPlayer = document.getElementById("videoPlayer");
+
+  const revealBtn = document.getElementById("revealBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+
+  let videoFile = null;
+
+  /* CLICK UPLOAD */
+  uploadZone.onclick = () => {
+    if (!uploadZone.classList.contains("disabled")) {
+      videoInput.click();
+    }
+  };
+
+  videoInput.onchange = () => {
+    if (!videoInput.files.length) return;
+
+  videoFile = videoInput.files[0];
+  const url = URL.createObjectURL(videoFile);
+
+  videoPlayer.src = url;
+  videoPreview.style.display = "block";
+
+  uploadZone.classList.add("disabled");  
+  revealBtn.disabled = false;            
+  cancelBtn.disabled = false;
+  };
+
+  /* CANCEL VIDEO */
+  cancelBtn.onclick = () => {
+    videoFile = null;
+  videoInput.value = "";
+
+  videoPlayer.pause();
+  videoPlayer.src = "";
+  videoPreview.style.display = "none";
+
+  uploadZone.classList.remove("disabled");  
+  revealBtn.disabled = true;                
+  cancelBtn.disabled = true; 
+  };
+
+  /* REVEAL VIDEO (backend call stays as-is) */
+  revealBtn.onclick = () => {
+    if (!videoFile) return;
+    alert("Reveal Video clicked (backend call here)");
+  };
+</script>
+
 </body>
 </html>

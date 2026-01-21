@@ -191,7 +191,9 @@
       display: none;
     }
 
-    .results.active { display: block; }
+    .results.active { 
+      display: block; 
+    }
 
     .ai {
       border: 2px solid #ef4444;
@@ -223,6 +225,13 @@
     <div id="videoPreview" class="video-preview">
       <video id="videoPlayer" controls playsinline></video>
     </div>
+
+    <!-- ACTION BUTTONS (OUTSIDE THE BOX) -->
+    <div class="action-buttons">
+      <button id="cancelVideoBtn" onclick="resetVideo()" disabled>
+        Cancel Video
+      </button>
+    </div>
   </div>
 
   <!-- RIGHT: CONTROLS -->
@@ -230,10 +239,8 @@
 
     <div id="videoUploadZone" class="upload-zone">
       <span id="uploadText"><strong>Drop your video here</strong></span>
-      <button id="removeVideoBtn" class="close-btn" style="display:none;">&times;</button>
       <input type="file" id="videoInput" accept="video/*" hidden>
     </div>
-
 
     <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
       Reveal Video
@@ -251,12 +258,6 @@
   </div>
 </div>
 
-  <div id="videoFileInfo" class="file-info">
-    <span id="videoFileName"></span>
-    <button class="close-btn" onclick="resetVideo()" aria-label="Remove file">
-      &times;
-    </button>
-  </div>
 
   <div id="videoPreview" style="display:none; margin-top: 30px; text-align:center;">
     <video id="videoPlayer" controls playsinline
@@ -278,12 +279,17 @@
 
 <script>
 /* ================= VIDEO LOGIC ================= */
-let videoFile = null;
-
-const videoUploadZone = document.getElementById("videoUploadZone");
-const videoInput = document.getElementById("videoInput");
+//const videoUploadZone = document.getElementById("videoUploadZone");
 const videoAnalyzeBtn = document.getElementById("videoAnalyzeBtn");
+const videoInput = document.getElementById("videoInput");
+const revealBtn = document.getElementById("revealBtn");
+const cancelBtn = document.getElementById("cancelBtn");
+const videoPlayer = document.getElementById("videoPlayer");
+const videoPreview = document.getElementById("videoPreview");
+const uploadZone = document.getElementById("uploadZone");
 
+let videoFile = null;
+    
 videoUploadZone.onclick = () => videoInput.click();
 
 videoUploadZone.addEventListener("dragover", e => {
@@ -312,10 +318,16 @@ function handleVideo(file) {
   }
 
   videoFile = file;
+  videoInput.value = "";
+  //document.getElementById("videoFileName").innerText = file.name;
+  //document.getElementById("videoFileInfo").classList.add("active");
+
+  videoAnalyzeBtn.disabled = false;
+  document.getElementById("cancelVideoBtn").disabled = false;
+
 
   // Update upload box text
   document.getElementById("uploadText").innerText = file.name;
-  document.getElementById("removeVideoBtn").style.display = "block";
 
   // Show video preview
   const videoPlayer = document.getElementById("videoPlayer");
@@ -334,10 +346,15 @@ function resetVideo() {
   videoFile = null;
   videoInput.value = "";
 
+  //document.getElementById("videoFileInfo").classList.remove("active");
+  document.getElementById("videoResults").classList.remove("active");
+  document.getElementById("videoProgress").classList.remove("active");
+
+  document.getElementById("cancelVideoBtn").disabled = true;
+
   // Restore upload box
   document.getElementById("uploadText").innerHTML = "<strong>Drop your video here</strong>";
-  document.getElementById("removeVideoBtn").style.display = "none";
-
+  
   // Hide video preview
   const videoPlayer = document.getElementById("videoPlayer");
   videoPlayer.pause();
@@ -345,6 +362,10 @@ function resetVideo() {
   document.querySelector(".video-preview").style.display = "none";
 
   videoAnalyzeBtn.disabled = true;
+}
+
+function triggerUpload() {
+  videoInput.click();
 }
 
 async function analyzeVideo() {
