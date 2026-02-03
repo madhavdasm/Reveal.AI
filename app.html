@@ -5,11 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>REVEAL.AI</title>
 
-  <!-- Google Font -->
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
 
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
     body {
       min-height: 100vh;
@@ -19,15 +22,16 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      margin: 0 auto;
     }
 
     .container {
       width: 100%;
       max-width: 900px;
       padding: 10px;
+      margin: 0 auto;
     }
 
-    /* LOGO */
     .logo-container {
       display: flex;
       justify-content: center;
@@ -39,41 +43,29 @@
       height: 400px;
     }
 
-    .subtitle {
-      text-align: center;
-      opacity: 0.8;
-      margin-bottom: 48px;
-      font-size: 30px;
-    }
-    
-    .close-btn {
-      background: none;
-      border: none;
-      color: #eaeaea;
-      font-size: 28px;
-      font-weight: 600;
-      cursor: pointer;
-      padding: 4px 10px;
-      line-height: 1;
-      transition: transform 0.2s ease, opacity 0.2s ease;
-    }
-
-    .close-btn:hover {
-      transform: scale(1.2);
-      opacity: 0.8;
-    }
-
-    .close-btn:focus {
-      outline: none;
-    }
-
     .section-title {
       text-align: center;
       font-size: 28px;
       margin-bottom: 16px;
     }
 
-    /* UPLOAD */
+    .analysis-layout {
+      display: flex;
+      gap: 40px;
+      align-items: flex-start;
+    }
+
+    .left-panel {
+      flex: 1.1;
+    }
+
+    .right-panel {
+      flex: 0.9;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
     .upload-zone {
       border: 3px dashed #3282b8;
       border-radius: 20px;
@@ -82,22 +74,16 @@
       cursor: pointer;
       transition: 0.3s;
       background: #16213e;
+      position: relative;
     }
 
-    .upload-zone.drag { transform: scale(1.02); }
-    .upload-zone:hover { transform: translateY(-3px); }
-
-    .file-info {
-      margin-top: 20px;
-      padding: 20px;
-      background: #16213e;
-      border-radius: 16px;
-      display: none;
-      justify-content: space-between;
-      align-items: center;
+    .upload-zone.drag {
+      transform: scale(1.02);
     }
 
-    .file-info.active { display: flex; }
+    .upload-zone:hover {
+      transform: translateY(-3px);
+    }
 
     button {
       width: 100%;
@@ -112,67 +98,56 @@
       color: white;
     }
 
-    .analysis-layout {
-  display: flex;
-  gap: 40px;
-  align-items: flex-start;
-}
-
-/* LEFT PANEL */
-.left-panel {
-  flex: 1.1;
-}
-
-.upload-zone {
-  position: relative;
-}
-
-#removeVideoBtn {
-  position: absolute;
-  top: 14px;
-  right: 18px;
-}
-
-
-.video-preview {
-  display: none;
-}
-
-.video-preview video {
-  width: 100%;
-  border-radius: 20px;
-  background: black;
-}
-
-/* RIGHT PANEL */
-.right-panel {
-  flex: 0.9;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-/* MOBILE RESPONSIVE */
-@media (max-width: 900px) {
-  .analysis-layout {
-    flex-direction: column;
-  }
-}
-
-
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
 
-    /* PROGRESS */
+    .video-preview {
+      position: relative;
+      display: none;
+      width: 100%;
+    }
+
+    .video-preview video {
+      width: 100%;
+      border-radius: 20px;
+      background: black;
+      display: block;
+    }
+
+    .video-close-btn {
+      position: absolute;
+      top: -12px;
+      right: 6px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      font-size: 18px;
+      cursor: pointer;
+      z-index: 1000;
+      transition: 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .video-close-btn:hover {
+      background: #ef4444;
+      transform: scale(1.1);
+    }
+
     .progress {
       margin-top: 24px;
       display: none;
     }
 
-    
-    .progress.active { display: block; }
+    .progress.active {
+      display: block;
+    }
 
     .bar {
       height: 8px;
@@ -182,17 +157,40 @@
       transition: width 0.3s;
     }
 
-    /* RESULTS */
+    .results-wrapper {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }
+
     .results {
-      margin-top: 32px;
+      margin: 40px auto 0 auto;
       padding: 32px;
       border-radius: 20px;
       text-align: center;
       display: none;
+      max-width: 600px;
     }
 
-    .results.active { 
-      display: block; 
+    .results.active {
+      display: block;
+    }
+
+    .results h2 {
+      margin-bottom: 12px;
+    }
+
+    .results h3 {
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+
+    .results p {
+      margin: 6px 0;
+    }
+
+    .results hr {
+      margin: 16px 0;
     }
 
     .ai {
@@ -204,210 +202,183 @@
       border: 2px solid #10b981;
       color: #10b981;
     }
+
+    @media (max-width: 900px) {
+      .analysis-layout {
+        flex-direction: column;
+      }
+    }
   </style>
 </head>
 
 <body>
-<div class="container">
+  <div class="container">
 
-  <!-- LOGO -->
-  <div class="logo-container">
-    <img src="Reveal.AI text.png" alt="REVEAL.AI Logo" class="logo">
-  </div>
-
-  <!-- VIDEO SECTION -->
-  <h2 class="section-title">Analyse your video</h2>
-
-  <div class="analysis-layout">
-
-  <!-- LEFT: VIDEO PREVIEW -->
-  <div class="right-panel">
-    <div id="videoPreview" class="video-preview">
-      <video id="videoPlayer" controls playsinline></video>
+    <div class="logo-container">
+      <img src="Reveal.AI text.png" alt="REVEAL.AI Logo" class="logo">
     </div>
 
-    <!-- ACTION BUTTONS (OUTSIDE THE BOX) -->
-    <div class="action-buttons">
-      <button id="cancelVideoBtn" onclick="resetVideo()" disabled>
-        Cancel Video
-      </button>
-    </div>
-  </div>
+    <h2 class="section-title">Analyse your video</h2>
 
-  <!-- RIGHT: CONTROLS -->
-  <div class="left-panel">
+    <div class="analysis-layout">
 
-    <div id="videoUploadZone" class="upload-zone">
-      <span id="uploadText"><strong>Drop your video here</strong></span>
-      <input type="file" id="videoInput" accept="video/*" hidden>
-    </div>
+      <!-- VIDEO PANEL -->
+      <div class="right-panel">
+        <div id="videoPreview" class="video-preview">
+          <button class="video-close-btn" onclick="resetVideo()">✖</button>
+          <video id="videoPlayer" controls playsinline></video>
+        </div>
+      </div>
 
-    <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
-      Reveal Video
-    </button>
+      <!-- CONTROL PANEL -->
+      <div class="left-panel">
+        <div id="videoUploadZone" class="upload-zone">
+          <span id="uploadText"><strong>Drop your video here</strong></span>
+          <input type="file" id="videoInput" accept="video/*" hidden>
+        </div>
 
-    <div id="videoProgress" class="progress">
-      <p>Analyzing video…</p>
-      <div style="background:#111827;border-radius:999px;">
-        <div id="videoProgressBar" class="bar"></div>
+        <button id="videoAnalyzeBtn" disabled onclick="analyzeVideo()">
+          Reveal Video
+        </button>
+
+        <div id="videoProgress" class="progress">
+          <p>Analyzing video…</p>
+          <div style="background:#111827;border-radius:999px;">
+            <div id="videoProgressBar" class="bar"></div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div id="videoResults" class="results"></div>
-
-  </div>
-</div>
-
-
-  <div id="videoPreview" style="display:none; margin-top: 30px; text-align:center;">
-    <video id="videoPlayer" controls playsinline
-          style="width:100%; max-width:700px; border-radius:20px;">
-    </video>
-  </div>
-
-
-  <div id="videoProgress" class="progress">
-    <p>Analyzing video…</p>
-    <div style="background:#111827;border-radius:999px;">
-      <div id="videoProgressBar" class="bar"></div>
+    <!-- RESULTS (CENTERED) -->
+    <div class="results-wrapper">
+      <div id="videoResults" class="results"></div>
     </div>
+
   </div>
 
-  <div id="videoResults" class="results"></div>
+  <script>
+    const videoUploadZone = document.getElementById("videoUploadZone");
+    const videoAnalyzeBtn = document.getElementById("videoAnalyzeBtn");
+    const videoInput = document.getElementById("videoInput");
+    const videoPlayer = document.getElementById("videoPlayer");
+    const videoPreview = document.getElementById("videoPreview");
 
-</div>
+    let videoFile = null;
 
-<script>
-/* ================= VIDEO LOGIC ================= */
-//const videoUploadZone = document.getElementById("videoUploadZone");
-const videoAnalyzeBtn = document.getElementById("videoAnalyzeBtn");
-const videoInput = document.getElementById("videoInput");
-const revealBtn = document.getElementById("revealBtn");
-const cancelBtn = document.getElementById("cancelBtn");
-const videoPlayer = document.getElementById("videoPlayer");
-const videoPreview = document.getElementById("videoPreview");
-const uploadZone = document.getElementById("uploadZone");
+    videoUploadZone.onclick = () => videoInput.click();
 
-let videoFile = null;
-    
-videoUploadZone.onclick = () => videoInput.click();
-
-videoUploadZone.addEventListener("dragover", e => {
-  e.preventDefault();
-  videoUploadZone.classList.add("drag");
-});
-
-videoUploadZone.addEventListener("dragleave", () => {
-  videoUploadZone.classList.remove("drag");
-});
-
-videoUploadZone.addEventListener("drop", e => {
-  e.preventDefault();
-  videoUploadZone.classList.remove("drag");
-  if (e.dataTransfer.files.length) handleVideo(e.dataTransfer.files[0]);
-});
-
-videoInput.addEventListener("change", e => {
-  if (e.target.files.length) handleVideo(e.target.files[0]);
-});
-
-function handleVideo(file) {
-  if (!file.type.startsWith("video/")) {
-    alert("Invalid video file");
-    return;
-  }
-
-  videoFile = file;
-  videoInput.value = "";
-  //document.getElementById("videoFileName").innerText = file.name;
-  //document.getElementById("videoFileInfo").classList.add("active");
-
-  videoAnalyzeBtn.disabled = false;
-  document.getElementById("cancelVideoBtn").disabled = false;
-
-
-  // Update upload box text
-  document.getElementById("uploadText").innerText = file.name;
-
-  // Show video preview
-  const videoPlayer = document.getElementById("videoPlayer");
-  const videoPreview = document.querySelector(".video-preview");
-
-  const videoURL = URL.createObjectURL(file);
-  videoPlayer.src = videoURL;
-  videoPreview.style.display = "block";
-  videoPlayer.load();
-  videoPlayer.play();
-
-  videoAnalyzeBtn.disabled = false;
-}
-
-function resetVideo() {
-  videoFile = null;
-  videoInput.value = "";
-
-  //document.getElementById("videoFileInfo").classList.remove("active");
-  document.getElementById("videoResults").classList.remove("active");
-  document.getElementById("videoProgress").classList.remove("active");
-
-  document.getElementById("cancelVideoBtn").disabled = true;
-
-  // Restore upload box
-  document.getElementById("uploadText").innerHTML = "<strong>Drop your video here</strong>";
-  
-  // Hide video preview
-  const videoPlayer = document.getElementById("videoPlayer");
-  videoPlayer.pause();
-  videoPlayer.src = "";
-  document.querySelector(".video-preview").style.display = "none";
-
-  videoAnalyzeBtn.disabled = true;
-}
-
-function triggerUpload() {
-  videoInput.click();
-}
-
-async function analyzeVideo() {
-  videoAnalyzeBtn.disabled = true;
-  document.getElementById("videoProgress").classList.add("active");
-  document.getElementById("videoResults").classList.remove("active");
-
-  const bar = document.getElementById("videoProgressBar");
-  bar.style.width = "30%";
-
-  const formData = new FormData();
-  formData.append("file", videoFile);
-
-  try {
-    const res = await fetch("http://127.0.0.1:8000/predict", {
-      method: "POST",
-      body: formData
+    videoUploadZone.addEventListener("dragover", e => {
+      e.preventDefault();
+      videoUploadZone.classList.add("drag");
     });
 
-    bar.style.width = "80%";
-    const data = await res.json();
-    bar.style.width = "100%";
+    videoUploadZone.addEventListener("dragleave", () => {
+      videoUploadZone.classList.remove("drag");
+    });
 
-    showResult(data.prediction, data.confidence);
-  } catch {
-    alert("Backend not reachable");
-  }
+    videoUploadZone.addEventListener("drop", e => {
+      e.preventDefault();
+      videoUploadZone.classList.remove("drag");
+      if (e.dataTransfer.files.length) {
+        handleVideo(e.dataTransfer.files[0]);
+      }
+    });
 
-  document.getElementById("videoProgress").classList.remove("active");
-  videoAnalyzeBtn.disabled = false;
-}
+    videoInput.addEventListener("change", e => {
+      if (e.target.files.length) {
+        handleVideo(e.target.files[0]);
+      }
+    });
 
-function showResult(label, confidence) {
-  const resultDiv = document.getElementById("videoResults");
-  const isAI = label.toLowerCase().includes("ai");
+    function handleVideo(file) {
+      if (!file.type.startsWith("video/")) {
+        alert("Invalid video file");
+        return;
+      }
 
-  resultDiv.className = `results active ${isAI ? "ai" : "real"}`;
-  resultDiv.innerHTML = `
-    <h2>${label}</h2>
-    <p>Confidence: ${confidence}%</p>
-  `;
-}
-</script>
+      videoFile = file;
+      videoAnalyzeBtn.disabled = false;
+      document.getElementById("uploadText").innerText = file.name;
+
+      const videoURL = URL.createObjectURL(file);
+      videoPlayer.src = videoURL;
+      videoPreview.style.display = "block";
+      videoPlayer.load();
+      videoPlayer.play();
+    }
+
+    function resetVideo() {
+      videoFile = null;
+      videoInput.value = "";
+      document.getElementById("videoResults").classList.remove("active");
+      document.getElementById("videoProgress").classList.remove("active");
+      document.getElementById("uploadText").innerHTML = "<strong>Drop your video here</strong>";
+      videoPlayer.pause();
+      videoPlayer.src = "";
+      videoPreview.style.display = "none";
+      videoAnalyzeBtn.disabled = true;
+    }
+
+    async function analyzeVideo() {
+      videoAnalyzeBtn.disabled = true;
+      document.getElementById("videoProgress").classList.add("active");
+      document.getElementById("videoResults").classList.remove("active");
+
+      const bar = document.getElementById("videoProgressBar");
+      bar.style.width = "30%";
+
+      const formData = new FormData();
+      formData.append("file", videoFile);
+
+      try {
+        const res = await fetch("http://127.0.0.1:8000/predict", {
+          method: "POST",
+          body: formData
+        });
+
+        bar.style.width = "80%";
+        const data = await res.json();
+        bar.style.width = "100%";
+        showResult(data);
+      } catch {
+        alert("Backend not reachable");
+      }
+
+      document.getElementById("videoProgress").classList.remove("active");
+      videoAnalyzeBtn.disabled = false;
+    }
+
+    function showResult(data) {
+      const resultDiv = document.getElementById("videoResults");
+
+      const audioAI = (data.audio_model.ai_probability * 100).toFixed(2);
+      const audioReal = (data.audio_model.real_probability * 100).toFixed(2);
+      const videoAI = (data.video_model.ai_probability * 100).toFixed(2);
+      const videoReal = (data.video_model.real_probability * 100).toFixed(2);
+      const finalAI = (data.final_ai_probability * 100).toFixed(2);
+      const finalReal = (data.final_real_probability * 100).toFixed(2);
+
+      const isAI = data.prediction.includes("AI");
+
+      resultDiv.className = `results active ${isAI ? "ai" : "real"}`;
+      resultDiv.innerHTML = `
+        <h2>Final Result: ${data.prediction}</h2>
+        <p><strong>Overall Confidence:</strong> ${data.confidence}%</p>
+        <hr>
+        <h3>Audio Model</h3>
+        <p>AI: ${audioAI}%</p>
+        <p>Real: ${audioReal}%</p>
+        <hr>
+        <h3>Video Model</h3>
+        <p>AI: ${videoAI}%</p>
+        <p>Real: ${videoReal}%</p>
+        <hr>
+        <h3>Final Fusion</h3>
+        <p>AI: ${finalAI}%</p>
+        <p>Real: ${finalReal}%</p>
+      `;
+    }
+  </script>
 </body>
 </html>
