@@ -19,6 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+# Import pytorch-grad-cam library
+from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, EigenCAM, LayerCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
 app = FastAPI()
 
 # Serve static files (HTML, CSS, JS)
@@ -38,144 +43,6 @@ app.add_middleware(
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-# ================== GRAD-CAM IMPLEMENTATION ==================
-
-class GradCAM:
-    """Generic Grad-CAM implementation"""
-    def __init__(self, model, target_layer):
-        self.model = model
-        self.target_layer = target_layer
-        self.gradients = None
-        self.activations = None
-        
-        # Register hooks
-        self.handlers = []
-        self._register_hooks()
-    
-    def _register_hooks(self):
-        def forward_hook(module, input, output):
-            self.activations = output.detach()
-        
-        def full_backward_hook(module, grad_input, grad_output):
-            self.gradients = grad_output[0].detach()
-        
-        self.handlers.append(
-            self.target_layer.register_forward_hook(forward_hook)
-        )
-        self.handlers.append(
-            self.target_layer.register_full_backward_hook(full_backward_hook)
-        )
-    
-    def remove_hooks(self):
-        for handler in self.handlers:
-            handler.remove()
-    
-    def generate_cam(self, input_tensor, target_class=None):
-        """
-        Generate Grad-CAM heatmap
-        
-        Args:
-            input_tensor: Input to the model
-            target_class: Target class index (None = predicted class)
-        
-        Returns:
-            cam: Grad-CAM heatmap normalized to [0, 1]
-        """
-        self.model.eval()
-        
-        # Forward pass
-        output = self.model(input_tensor)
-        
-        if target_class is None:
-            target_class = output.argmax(dim=1).item()
-        
-        # Backward pass
-        self.model.zero_grad()
-        class_loss = output[0, target_class]
-        class_loss.backward()
-        
-        # Generate CAM
-        gradients = self.gradients
-        activations = self.activations
-        
-        # Global average pooling of gradients
-        weights = gradients.mean(dim=tuple(range(2, len(gradients.shape))), keepdim=True)
-        
-        # Weighted combination of activation maps
-        cam = (weights * activations).sum(dim=1, keepdim=True)
-        
-        # ReLU to keep only positive influences
-        cam = F.relu(cam)
-        
-        # Normalize to [0, 1]
-        cam = cam.squeeze().detach().cpu().numpy()
-        
-        # Robust normalization with percentile clipping for better contrast
-        cam_min = np.percentile(cam, 5)
-        cam_max = np.percentile(cam, 95)
-        
-        if cam_max > cam_min:
-            cam = (cam - cam_min) / (cam_max - cam_min + 1e-8)
-        else:
-            cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-        
-        # Clip to [0, 1]
-        cam = np.clip(cam, 0, 1)
-        
-        return cam
-
-
-class GradCAMPlusPlus(GradCAM):
-    """Grad-CAM++ implementation for better localization"""
-    def generate_cam(self, input_tensor, target_class=None):
-        self.model.eval()
-        
-        output = self.model(input_tensor)
-        
-        if target_class is None:
-            target_class = output.argmax(dim=1).item()
-        
-        self.model.zero_grad()
-        class_loss = output[0, target_class]
-        class_loss.backward(retain_graph=True)
-        
-        gradients = self.gradients
-        activations = self.activations
-        
-        # Calculate alpha weights
-        grad_2 = gradients.pow(2)
-        grad_3 = gradients.pow(3)
-        
-        # Avoid division by zero
-        alpha = grad_2 / (2 * grad_2 + (grad_3 * activations).sum(dim=tuple(range(2, len(gradients.shape))), keepdim=True) + 1e-8)
-        
-        # ReLU on gradients
-        relu_grad = F.relu(class_loss.exp() * gradients)
-        
-        # Weighted combination
-        weights = (alpha * relu_grad).sum(dim=tuple(range(2, len(gradients.shape))), keepdim=True)
-        
-        cam = (weights * activations).sum(dim=1, keepdim=True)
-        cam = F.relu(cam)
-        
-        cam = cam.squeeze().detach().cpu().numpy()
-        
-        # Robust normalization with percentile clipping for better contrast
-        cam_min = np.percentile(cam, 5)
-        cam_max = np.percentile(cam, 95)
-        
-        if cam_max > cam_min:
-            cam = (cam - cam_min) / (cam_max - cam_min + 1e-8)
-        else:
-            cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-        
-        # Clip to [0, 1]
-        cam = np.clip(cam, 0, 1)
-        
-        return cam
-
-
 
 # ================== MODEL ==================
 class MFCC_CNN(nn.Module):
@@ -209,7 +76,7 @@ class MFCC_CNN(nn.Module):
 
 model = MFCC_CNN().to(DEVICE)
 model.load_state_dict(
-    torch.load("mfcc_audio_detector.pth", map_location=DEVICE)
+    torch.load("mfcc_audio_detector.pth", map_location=DEVICE, weights_only=False)
 )
 model.eval()
 audio_model = model
@@ -257,15 +124,173 @@ def extract_mfcc(audio_path, sr=16000, n_mfcc=40, max_len=300):
 
     return mfcc
 
+# ================== VIDEO MODEL ==================
 video_model = swin3d_t(weights=None)
 video_model.head = torch.nn.Linear(video_model.head.in_features, 2)
 
 video_model.load_state_dict(
-    torch.load("best_swin_model.pth", map_location=DEVICE)
+    torch.load("best_swin_model.pth", map_location=DEVICE, weights_only=False)
 )
 
 video_model.to(DEVICE)
 video_model.eval()
+
+# ================== ATTENTION ROLLOUT FOR SWIN3D ==================
+
+ATTN_MAPS = []
+
+def save_attention(module, input, output):
+    try:
+        if isinstance(output, tuple):
+            output = output[0]
+
+        if hasattr(output, "shape") and len(output.shape) == 4:
+            # Expecting (B, heads, N, N)
+            ATTN_MAPS.append(output.detach().cpu())
+    except:
+        pass
+
+
+
+def register_attention_hooks(model):
+    hooks = []
+
+    for name, module in model.named_modules():
+        # Swin3D attention layer name pattern
+        if "attn" in name.lower() and hasattr(module, "forward"):
+            
+            def hook_fn(module, input, output):
+                try:
+                    # Swin attention output is (B, T*H*W, C) or similar
+                    if isinstance(output, tuple):
+                        output = output[0]
+
+                    if hasattr(output, "shape"):
+                        ATTN_MAPS.append(output.detach().cpu())
+                except:
+                    pass
+
+            hooks.append(module.register_forward_hook(hook_fn))
+
+    return hooks
+
+
+
+def compute_attention_rollout(attn_maps):
+    if len(attn_maps) == 0:
+        return None
+
+    attn = attn_maps[-1]
+
+    # (B, T, H, W, C)
+    if len(attn.shape) == 5:
+        attn = attn.mean(dim=4)   # (B, T, H, W)
+        attn = attn[0]            # (T, H, W)
+
+        # 🔥 NORMALIZE PER FRAME
+        attn = attn - attn.min()
+        attn = attn / (attn.max() + 1e-8)
+
+        return attn.numpy()
+
+    if len(attn.shape) == 3:
+        attn = attn.mean(dim=2)
+        attn = attn - attn.min()
+        attn = attn / (attn.max() + 1e-8)
+        return attn.numpy()
+
+    return None
+
+
+
+def tokens_to_spatial_map(rollout, num_frames):
+    # If already (T, H, W) → return directly
+    if len(rollout.shape) == 3:
+        return rollout
+
+    # Old fallback
+    rollout = rollout[0]
+    N = rollout.shape[0]
+
+    spatial = int(np.sqrt(N / num_frames))
+    spatial = max(spatial, 1)
+
+    total_needed = num_frames * spatial * spatial
+    rollout = rollout[:total_needed]
+
+    attn_map = rollout.reshape(num_frames, spatial, spatial)
+    return attn_map
+
+def find_swin3d_target_layers(model):
+    """
+    Automatically find the best target layer(s) for Swin3D Grad-CAM
+    
+    Returns:
+        list: Target layers suitable for Grad-CAM
+    """
+    print("\n=== Analyzing Swin3D Architecture ===")
+    
+    target_layers = []
+    
+    # Strategy 1: Look for the last norm layer in features
+    if hasattr(model, 'features'):
+        features = model.features
+        print(f"Features has {len(features)} modules")
+        
+        # Walk through the features in reverse to find norm layers
+        for i in range(len(features) - 1, -1, -1):
+            module = features[i]
+            module_name = f"features[{i}]"
+            print(f"  {module_name}: {type(module).__name__}")
+            
+            # Check if it's a Sequential containing blocks
+            if isinstance(module, nn.Sequential):
+                for j in range(len(module) - 1, -1, -1):
+                    submodule = module[j]
+                    submodule_name = f"features[{i}][{j}]"
+                    print(f"    {submodule_name}: {type(submodule).__name__}")
+                    
+                    # Look for blocks with norm layers
+                    if hasattr(submodule, 'blocks'):
+                        # Found blocks! Now find norm layers
+                        for k in range(len(submodule.blocks) - 1, -1, -1):
+                            block = submodule.blocks[k]
+                            if hasattr(block, 'norm2'):
+                                target_layer = block.norm2
+                                target_layers.append(target_layer)
+                                print(f"    ✓ Found target: features[{i}][{j}].blocks[{k}].norm2")
+                                return target_layers
+                            elif hasattr(block, 'norm1'):
+                                target_layer = block.norm1
+                                target_layers.append(target_layer)
+                                print(f"    ✓ Found target: features[{i}][{j}].blocks[{k}].norm1")
+                                return target_layers
+                    
+                    # Check if the submodule itself is a norm layer
+                    if isinstance(submodule, (nn.LayerNorm, nn.BatchNorm3d, nn.GroupNorm)):
+                        target_layers.append(submodule)
+                        print(f"    ✓ Found target: {submodule_name}")
+                        return target_layers
+            
+            # Check if it's directly a norm layer or has norm
+            if isinstance(module, (nn.LayerNorm, nn.BatchNorm3d, nn.GroupNorm)):
+                target_layers.append(module)
+                print(f"  ✓ Found target: {module_name}")
+                return target_layers
+            
+            if hasattr(module, 'norm'):
+                target_layers.append(module.norm)
+                print(f"  ✓ Found target: {module_name}.norm")
+                return target_layers
+    
+    # Fallback: use the last layer of features
+    if not target_layers and hasattr(model, 'features'):
+        print("  ⚠ Using fallback: features[-1]")
+        target_layers = [model.features[-1]]
+    
+    print("=== End Architecture Analysis ===\n")
+    return target_layers
+
 
 def load_video_for_swin(path, max_frames=32):
     cap = cv2.VideoCapture(path)
@@ -306,21 +331,69 @@ def load_video_for_swin(path, max_frames=32):
     video = (video - mean) / std
     return video.unsqueeze(0), frames
 
+
+# ================== SWIN3D RESHAPE TRANSFORM ==================
+def swin3d_reshape_transform(tensor, height=7, width=7, depth=8):
+    """
+    Reshape transform for Swin3D Transformer
+    Handles various output formats from Swin3D layers
+    """
+    # Handle different tensor shapes
+    if len(tensor.shape) == 3:
+        # (B, N, C) format - typical Swin output
+        B, N, C = tensor.shape
+        
+        # Calculate dimensions
+        expected_n = depth * height * width
+        
+        if N == expected_n:
+            # Perfect match
+            result = tensor.reshape(B, depth, height, width, C)
+        elif N == expected_n + 1:
+            # Has class token, remove it
+            tensor = tensor[:, 1:, :]
+            result = tensor.reshape(B, depth, height, width, C)
+        else:
+            # Try to infer dimensions
+            # Common: N = H*W (no temporal) or N = T*H*W
+            if N == height * width:
+                # 2D spatial only, add temporal dimension
+                result = tensor.reshape(B, height, width, C).unsqueeze(1)
+                result = result.expand(B, depth, height, width, C)
+            else:
+                # Best effort: assume square spatial
+                spatial_size = int(np.sqrt(N / depth))
+                result = tensor.reshape(B, depth, spatial_size, spatial_size, C)
+        
+        # Permute to (B, C, T, H, W)
+        result = result.permute(0, 4, 1, 2, 3)
+        
+    elif len(tensor.shape) == 5:
+        # Already in (B, C, T, H, W) or (B, T, H, W, C) format
+        if tensor.shape[1] < tensor.shape[-1]:
+            # Likely (B, T, H, W, C) - need to permute
+            result = tensor.permute(0, 4, 1, 2, 3)
+        else:
+            # Already (B, C, T, H, W)
+            result = tensor
+    else:
+        # Fallback - return as is
+        print(f"Warning: Unexpected tensor shape {tensor.shape}")
+        result = tensor
+    
+    return result
+
+
 # ================== XAI VISUALIZATION UTILITIES ==================
 
 def visualize_audio_gradcam(mfcc, cam_heatmap):
     """
     Create visualization of Grad-CAM on MFCC spectrogram
-    
-    Returns:
-        Base64 encoded image
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
-    # Enhance CAM contrast
     cam_enhanced = cam_heatmap.copy()
-    # Apply power law transformation to enhance highlights
-    cam_enhanced = np.power(cam_enhanced, 0.5)  # Makes highlights more visible
+    cam_enhanced = np.power(cam_enhanced, 0.5)
     
     # Original MFCC
     axes[0].imshow(mfcc, aspect='auto', origin='lower', cmap='viridis')
@@ -328,23 +401,22 @@ def visualize_audio_gradcam(mfcc, cam_heatmap):
     axes[0].set_xlabel('Time')
     axes[0].set_ylabel('MFCC Coefficients')
     
-    # Grad-CAM heatmap with enhanced contrast
+    # Grad-CAM heatmap
     im1 = axes[1].imshow(cam_enhanced, aspect='auto', origin='lower', cmap='jet', vmin=0, vmax=1)
     axes[1].set_title('Grad-CAM Attention Map', fontsize=12, fontweight='bold')
     axes[1].set_xlabel('Time')
     axes[1].set_ylabel('MFCC Coefficients')
     plt.colorbar(im1, ax=axes[1], label='Importance')
     
-    # Overlay with higher alpha for visibility
+    # Overlay
     axes[2].imshow(mfcc, aspect='auto', origin='lower', cmap='gray', alpha=0.5)
-    im2 = axes[2].imshow(cam_enhanced, aspect='auto', origin='lower', cmap='jet', alpha=0.6, vmin=0, vmax=1)
+    axes[2].imshow(cam_enhanced, aspect='auto', origin='lower', cmap='jet', alpha=0.6, vmin=0, vmax=1)
     axes[2].set_title('MFCC + Grad-CAM Overlay', fontsize=12, fontweight='bold')
     axes[2].set_xlabel('Time')
     axes[2].set_ylabel('MFCC Coefficients')
     
     plt.tight_layout()
     
-    # Convert to base64
     buffer = BytesIO()
     plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
     buffer.seek(0)
@@ -354,84 +426,85 @@ def visualize_audio_gradcam(mfcc, cam_heatmap):
     return image_base64
 
 
-def visualize_video_gradcam(frames, cam_3d, num_frames_to_show=8):
+def visualize_video_gradcam_3d(frames, cam_3d, num_frames_to_show=8):
     """
-    Create visualization of Grad-CAM on video frames
-    
-    Args:
-        frames: Original video frames (T, H, W, C)
-        cam_3d: 3D Grad-CAM heatmap (T, H, W) or (H, W)
-        num_frames_to_show: Number of frames to visualize
-    
-    Returns:
-        Base64 encoded image
+    Enhanced visualization for 3D video Grad-CAM
     """
     num_frames = len(frames)
-    
-    # Adjust num_frames_to_show if we have fewer frames
     num_frames_to_show = min(num_frames_to_show, num_frames)
     
     indices = np.linspace(0, num_frames - 1, num_frames_to_show).astype(int)
     
-    fig, axes = plt.subplots(2, num_frames_to_show, figsize=(20, 5))
-    
-    # Handle case where we only have 1 frame to show
-    if num_frames_to_show == 1:
-        axes = axes.reshape(2, 1)
+    fig = plt.figure(figsize=(24, 8))
+    gs = fig.add_gridspec(3, num_frames_to_show, hspace=0.35, wspace=0.1)
     
     for idx, frame_idx in enumerate(indices):
         frame = frames[frame_idx]
         
-        # Get the appropriate CAM frame
-        if len(cam_3d.shape) == 3 and cam_3d.shape[0] > frame_idx:
-            # 3D CAM with temporal dimension
+        # Get corresponding CAM
+        if len(cam_3d.shape) == 3 and frame_idx < cam_3d.shape[0]:
             cam_frame = cam_3d[frame_idx]
         elif len(cam_3d.shape) == 3:
-            # 3D CAM but not enough frames, use the last one
             cam_frame = cam_3d[-1]
         elif len(cam_3d.shape) == 2:
-            # 2D CAM (spatial only), use for all frames
             cam_frame = cam_3d
         else:
-            # Fallback: create empty cam
             cam_frame = np.zeros((frame.shape[0], frame.shape[1]))
         
-        # Enhance CAM contrast - apply power law transformation
-        cam_enhanced = np.power(cam_frame, 0.6)  # Makes highlights more visible
+        # Resize CAM to match frame size
+        cam_resized = cv2.resize(cam_frame, (frame.shape[1], frame.shape[0]), 
+                                interpolation=cv2.INTER_CUBIC)
         
-        # Resize cam to match frame size
-        cam_resized = cv2.resize(cam_enhanced, (frame.shape[1], frame.shape[0]))
+        # Apply smoothing
+        cam_smooth = cv2.GaussianBlur(cam_resized, (0, 0), sigmaX=2.5, sigmaY=2.5)
         
-        # Apply a threshold to make weak activations transparent
-        cam_resized_masked = np.where(cam_resized > 0.3, cam_resized, 0)
+        # Threshold
+        threshold = 0.35
+        cam_thresholded = np.where(cam_smooth > threshold, cam_smooth, 0)
         
-        # Original frame
-        axes[0, idx].imshow(frame)
-        axes[0, idx].axis('off')
+        if cam_thresholded.max() > 0:
+            cam_thresholded = cam_thresholded / cam_thresholded.max()
+        
+        # Row 1: Original frames
+        ax1 = fig.add_subplot(gs[0, idx])
+        ax1.imshow(frame)
+        ax1.axis('off')
         if idx == 0:
-            axes[0, idx].set_title(f'Frame {frame_idx}\n(Original)', fontsize=10, fontweight='bold')
-        else:
-            axes[0, idx].set_title(f'Frame {frame_idx}', fontsize=10)
+            ax1.set_title('Original Frames', fontsize=11, fontweight='bold', pad=10)
         
-        # Overlay with enhanced visibility
-        axes[1, idx].imshow(frame)
-        # Use masked CAM with higher alpha for better visibility
-        im = axes[1, idx].imshow(cam_resized_masked, cmap='jet', alpha=0.6, vmin=0, vmax=1, interpolation='bilinear')
-        axes[1, idx].axis('off')
+        # Row 2: Pure heatmap
+        ax2 = fig.add_subplot(gs[1, idx])
+        im = ax2.imshow(cam_smooth, cmap='jet', vmin=0, vmax=1)
+        ax2.axis('off')
         if idx == 0:
-            axes[1, idx].set_title('Grad-CAM\nOverlay', fontsize=10, fontweight='bold')
+            ax2.set_title('Attention Heatmap\n(Spatial Focus)', fontsize=11, fontweight='bold', pad=10)
+        
+        # Row 3: Overlay
+        ax3 = fig.add_subplot(gs[2, idx])
+        ax3.imshow(frame)
+        ax3.imshow(cam_thresholded, cmap='jet', alpha=0.55, vmin=0, vmax=1, 
+                  interpolation='bilinear')
+        ax3.axis('off')
+        if idx == 0:
+            ax3.set_title('AI Region Detection\n(Mouth, Fingers, etc.)', fontsize=11, fontweight='bold', pad=10)
+        
+        ax3.text(0.5, -0.15, f'Frame {frame_idx}', transform=ax3.transAxes,
+                ha='center', va='top', fontsize=9, color='black')
     
-    # Add a colorbar to show the attention scale
-    fig.subplots_adjust(right=0.92)
-    cbar_ax = fig.add_axes([0.94, 0.15, 0.01, 0.7])
+    # Colorbar
+    cbar_ax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
     cbar = fig.colorbar(im, cax=cbar_ax)
-    cbar.set_label('Attention Intensity', rotation=270, labelpad=15)
+    cbar.set_label('Attention Intensity', rotation=270, labelpad=20, fontsize=11)
     
-    plt.tight_layout(rect=[0, 0, 0.93, 1])
+    # Title
+    fig.suptitle('Video Grad-CAM: Spatial-Temporal Analysis\n(Red areas = Model\'s focus for AI detection)', 
+                 fontsize=14, fontweight='bold', y=0.98)
     
-    # Convert to base64
+    plt.tight_layout(rect=[0, 0, 0.91, 0.96])
+    
     buffer = BytesIO()
-    plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight')
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
     buffer.seek(0)
     image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
     plt.close(fig)
@@ -443,13 +516,9 @@ def visualize_video_gradcam(frames, cam_3d, num_frames_to_show=8):
 @app.post("/predict")
 async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = True):
     """
-    Predict if video is AI-generated or real, with optional Grad-CAM visualization
-    
-    Args:
-        file: Uploaded video file
-        enable_gradcam: Whether to generate Grad-CAM visualizations (default: True)
+    Predict if video is AI-generated or real, with Grad-CAM visualization
     """
-    # Save uploaded video
+    
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
         temp_video.write(await file.read())
         video_path = temp_video.name
@@ -458,13 +527,9 @@ async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = Tru
 
     try:
         # ================= AUDIO MODEL =================
-        # 1. Extract audio
         extract_audio_from_video(video_path, temp_audio)
-
-        # 2. Extract MFCC
         mfcc = extract_mfcc(temp_audio)
-
-        # 3. Prepare tensor (1, 1, 40, 300)
+        
         audio_x = (
             torch.tensor(mfcc)
             .unsqueeze(0)
@@ -473,91 +538,73 @@ async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = Tru
             .to(DEVICE)
         )
 
-        # 4. Audio prediction
         with torch.no_grad():
             audio_probs = torch.softmax(audio_model(audio_x), dim=1)
 
         audio_real = float(audio_probs[0][0])
         audio_ai = float(audio_probs[0][1])
 
-        # 5. Audio Grad-CAM
+        # Audio Grad-CAM
         audio_gradcam_viz = None
         if enable_gradcam:
             try:
-                # Target the last conv layer before adaptive pooling
-                target_layer = audio_model.features[6]  # Conv2d(64, 128, ...)
-                
-                audio_gradcam = GradCAMPlusPlus(audio_model, target_layer)
-                
-                # Create new tensor with gradient enabled for Grad-CAM
-                audio_x_grad = audio_x.clone().detach().requires_grad_(True)
-                
-                # Generate CAM for predicted class
+                target_layer = [audio_model.features[6]]
                 predicted_class = audio_probs.argmax(dim=1).item()
-                cam_audio = audio_gradcam.generate_cam(audio_x_grad, target_class=predicted_class)
+                targets = [ClassifierOutputTarget(predicted_class)]
                 
-                # Resize CAM to MFCC size
-                cam_resized = cv2.resize(cam_audio, (mfcc.shape[1], mfcc.shape[0]))
+                with GradCAMPlusPlus(model=audio_model, target_layers=target_layer) as cam:
+                    grayscale_cam = cam(input_tensor=audio_x, targets=targets, aug_smooth=True)
+                    grayscale_cam = grayscale_cam[0, :]
                 
-                # Create visualization
+                cam_resized = cv2.resize(grayscale_cam, (mfcc.shape[1], mfcc.shape[0]))
                 audio_gradcam_viz = visualize_audio_gradcam(mfcc, cam_resized)
                 
-                audio_gradcam.remove_hooks()
             except Exception as e:
                 print(f"Audio Grad-CAM error: {e}")
+                import traceback
+                traceback.print_exc()
 
         # ================= VIDEO MODEL (SWIN3D) =================
         video_x, original_frames = load_video_for_swin(video_path)
         video_x = video_x.to(DEVICE)
 
+        # Register hooks BEFORE forward pass
+        ATTN_MAPS.clear()
+        hooks = register_attention_hooks(video_model)
+
         with torch.no_grad():
-            video_probs = torch.softmax(video_model(video_x), dim=1)
+            video_logits = video_model(video_x)
+            video_probs = torch.softmax(video_logits, dim=1)
+
+        # Remove hooks
+        for h in hooks:
+            h.remove()
+        
+        print("Captured attention maps:", len(ATTN_MAPS))
+        if len(ATTN_MAPS) > 0:
+            print("Sample attention map shape:", ATTN_MAPS[0].shape)    
+
 
         video_real = float(video_probs[0][0])
         video_ai = float(video_probs[0][1])
 
-        # 6. Video Grad-CAM
+        # ================= VIDEO XAI USING ATTENTION ROLLOUT =================
         video_gradcam_viz = None
         if enable_gradcam:
             try:
-                # Target the last layer before the head
-                # For Swin3D, we'll target the last block
-                target_layer = video_model.features[-1]  # Last feature block
-                
-                video_gradcam = GradCAMPlusPlus(video_model, target_layer)
-                
-                # Create new tensor with gradient enabled for Grad-CAM
-                video_x_grad = video_x.clone().detach().requires_grad_(True)
-                
-                # Generate CAM for predicted class
-                predicted_class = video_probs.argmax(dim=1).item()
-                cam_video = video_gradcam.generate_cam(video_x_grad, target_class=predicted_class)
-                
-                # The Swin3D CAM is typically 2D spatial (H, W)
-                # We replicate it across all frames for visualization
-                if len(cam_video.shape) == 2:
-                    # (H, W) - this is the spatial attention map
-                    cam_video_3d = np.stack([cam_video] * len(original_frames))
-                elif len(cam_video.shape) == 3:
-                    # If somehow we got 3D, use it directly
-                    cam_video_3d = cam_video
-                else:
-                    # 1D - reshape to spatial
-                    side = int(np.sqrt(cam_video.shape[0]))
-                    cam_video_2d = cam_video.reshape(side, side)
-                    cam_video_3d = np.stack([cam_video_2d] * len(original_frames))
-                
-                # Create visualization
-                video_gradcam_viz = visualize_video_gradcam(original_frames, cam_video_3d)
-                
-                video_gradcam.remove_hooks()
+                rollout = compute_attention_rollout(ATTN_MAPS)
+                print("Rollout shape:", None if rollout is None else rollout.shape)
+
+
+                if rollout is not None:
+                    cam_3d = tokens_to_spatial_map(rollout, len(original_frames))
+                    video_gradcam_viz = visualize_video_gradcam_3d(original_frames, cam_3d)
+
             except Exception as e:
-                print(f"Video Grad-CAM error: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"Attention Rollout error: {e}")
+
 
         # ================= FUSION =================
-        # Weighted fusion (audio slightly higher)
         final_ai = 0.6 * audio_ai + 0.4 * video_ai
         final_real = 1.0 - final_ai
 
@@ -567,34 +614,29 @@ async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = Tru
         response = {
             "prediction": prediction,
             "confidence": confidence,
-
-            # Audio model output
             "audio_model": {
                 "real_probability": round(audio_real, 4),
                 "ai_probability": round(audio_ai, 4)
             },
-
-            # Video model output
             "video_model": {
                 "real_probability": round(video_real, 4),
                 "ai_probability": round(video_ai, 4)
             },
-
-            # Final fusion output
             "final_ai_probability": round(final_ai, 4),
             "final_real_probability": round(final_real, 4)
         }
 
-        # Add Grad-CAM visualizations if enabled
         if enable_gradcam:
             response["explainability"] = {
                 "audio_gradcam": audio_gradcam_viz,
                 "video_gradcam": video_gradcam_viz
             }
-
+        print("video_gradcam_viz is None?", video_gradcam_viz is None)  # <-- ADD HERE
         return response
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
     finally:
@@ -606,37 +648,13 @@ async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = Tru
 
 @app.post("/predict_with_xai")
 async def predict_video_with_full_xai(file: UploadFile = File(...)):
-    """
-    Enhanced prediction endpoint with detailed XAI analysis
-    
-    Returns predictions with:
-    - Grad-CAM visualizations
-    - Attention maps
-    - Feature importance scores
-    """
+    """Enhanced prediction with XAI"""
     return await predict_video(file, enable_gradcam=True)
 
 
-def predict_video_visual(video_path):
-    x, frames = load_video_for_swin(video_path)
-    x = x.to(DEVICE)
-
-    with torch.no_grad():
-        probs = torch.softmax(video_model(x), dim=1)
-
-    return {
-        "real_probability": float(probs[0][0]),
-        "ai_probability": float(probs[0][1])
-    }
-
-
-# ================== ADDITIONAL XAI ENDPOINTS ==================
-
 @app.post("/explain_audio")
 async def explain_audio_prediction(file: UploadFile = File(...)):
-    """
-    Generate detailed explanation for audio-based prediction
-    """
+    """Generate audio explanation"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
         temp_audio.write(await file.read())
         audio_path = temp_audio.name
@@ -648,29 +666,21 @@ async def explain_audio_prediction(file: UploadFile = File(...)):
         with torch.no_grad():
             probs = torch.softmax(audio_model(audio_x), dim=1)
         
-        # Grad-CAM
-        target_layer = audio_model.features[6]
-        gradcam = GradCAMPlusPlus(audio_model, target_layer)
+        target_layer = [audio_model.features[6]]
+        targets = [ClassifierOutputTarget(probs.argmax(dim=1).item())]
         
-        # Create new tensor with gradient enabled
-        audio_x_grad = audio_x.clone().detach().requires_grad_(True)
+        with GradCAMPlusPlus(model=audio_model, target_layers=target_layer) as cam:
+            grayscale_cam = cam(input_tensor=audio_x, targets=targets, aug_smooth=True)
+            grayscale_cam = grayscale_cam[0, :]
         
-        cam = gradcam.generate_cam(audio_x_grad, target_class=probs.argmax(dim=1).item())
-        cam_resized = cv2.resize(cam, (mfcc.shape[1], mfcc.shape[0]))
-        
+        cam_resized = cv2.resize(grayscale_cam, (mfcc.shape[1], mfcc.shape[0]))
         viz = visualize_audio_gradcam(mfcc, cam_resized)
-        
-        gradcam.remove_hooks()
         
         return {
             "prediction": "AI-GENERATED" if probs[0][1] > 0.5 else "REAL",
-            "probabilities": {
-                "real": float(probs[0][0]),
-                "ai": float(probs[0][1])
-            },
+            "probabilities": {"real": float(probs[0][0]), "ai": float(probs[0][1])},
             "gradcam_visualization": viz
         }
-    
     finally:
         if os.path.exists(audio_path):
             os.remove(audio_path)
@@ -678,9 +688,7 @@ async def explain_audio_prediction(file: UploadFile = File(...)):
 
 @app.post("/explain_video")
 async def explain_video_prediction(file: UploadFile = File(...)):
-    """
-    Generate detailed explanation for video-based prediction
-    """
+    """Generate video explanation"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
         temp_video.write(await file.read())
         video_path = temp_video.name
@@ -688,40 +696,32 @@ async def explain_video_prediction(file: UploadFile = File(...)):
     try:
         video_x, frames = load_video_for_swin(video_path)
         video_x = video_x.to(DEVICE)
-        
+
+        ATTN_MAPS.clear()
+        hooks = register_attention_hooks(video_model)
+
         with torch.no_grad():
-            probs = torch.softmax(video_model(video_x), dim=1)
-        
-        # Grad-CAM
-        target_layer = video_model.features[-1]
-        gradcam = GradCAMPlusPlus(video_model, target_layer)
-        
-        # Create new tensor with gradient enabled
-        video_x_grad = video_x.clone().detach().requires_grad_(True)
-        
-        cam = gradcam.generate_cam(video_x_grad, target_class=probs.argmax(dim=1).item())
-        
-        if len(cam.shape) == 2:
-            cam_3d = np.stack([cam] * len(frames))
-        else:
-            cam_3d = cam
-        
-        viz = visualize_video_gradcam(frames, cam_3d)
-        
-        gradcam.remove_hooks()
-        
+            logits = video_model(video_x)
+            probs = torch.softmax(logits, dim=1)
+
+        for h in hooks:
+            h.remove()
+
+        rollout = compute_attention_rollout(ATTN_MAPS)
+
+        cam_3d = tokens_to_spatial_map(rollout, len(frames))
+        viz = visualize_video_gradcam_3d(frames, cam_3d)
+
         return {
             "prediction": "AI-GENERATED" if probs[0][1] > 0.5 else "REAL",
-            "probabilities": {
-                "real": float(probs[0][0]),
-                "ai": float(probs[0][1])
-            },
+            "probabilities": {"real": float(probs[0][0]), "ai": float(probs[0][1])},
             "gradcam_visualization": viz
         }
-    
+
     finally:
         if os.path.exists(video_path):
             os.remove(video_path)
+
 
 
 if __name__ == "__main__":
