@@ -44,6 +44,7 @@ app.add_middleware(
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
 # ================== MODEL ==================
 class MFCC_CNN(nn.Module):
     def __init__(self):
@@ -126,15 +127,22 @@ def extract_mfcc(audio_path, sr=16000, n_mfcc=40, max_len=300):
 
 # ================== VIDEO MODEL ==================
 video_model = swin3d_t(weights=None)
-video_model.head = torch.nn.Linear(video_model.head.in_features, 2)
 
-video_model.load_state_dict(
-    torch.load("best_swin_model2.pth", map_location=DEVICE, weights_only=False)
+in_features = video_model.head.in_features
+video_model.head = nn.Sequential(
+    nn.LayerNorm(in_features),
+    nn.GELU(),
+    nn.Linear(in_features, 256),
+    nn.GELU(),
+    nn.Dropout(0.5),
+    nn.Linear(256, 2)
 )
 
+checkpoint = torch.load("ai_detector.pth", map_location=DEVICE, weights_only=False)
+state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+video_model.load_state_dict(state_dict)
 video_model.to(DEVICE)
 video_model.eval()
-
 # ================== ATTENTION ROLLOUT FOR SWIN3D ==================
 
 ATTN_MAPS = []
@@ -292,7 +300,7 @@ def find_swin3d_target_layers(model):
     return target_layers
 
 
-def load_video_for_swin(path, max_frames=32):
+def load_video_for_swin(path, max_frames=16):
     cap = cv2.VideoCapture(path)
     frames = []
 
@@ -308,7 +316,7 @@ def load_video_for_swin(path, max_frames=32):
         if not ret:
             break
 
-        frame = cv2.resize(frame, (256, 256))
+        frame = cv2.resize(frame, (224, 224))
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames.append(frame)
 
@@ -319,9 +327,7 @@ def load_video_for_swin(path, max_frames=32):
 
     frames = np.array(frames)
 
-    # Center crop
-    i = (256 - 224) // 2
-    frames = frames[:, i:i+224, i:i+224, :]
+    
 
     video = torch.tensor(frames, dtype=torch.float32).permute(3, 0, 1, 2) / 255.0
 
@@ -585,8 +591,8 @@ async def predict_video(file: UploadFile = File(...), enable_gradcam: bool = Tru
             print("Sample attention map shape:", ATTN_MAPS[0].shape)    
 
 
-        video_real = float(video_probs[0][0])
-        video_ai = float(video_probs[0][1])
+        video_real = float(video_probs[0][0])  # 0 = REAL ✓
+        video_ai   = float(video_probs[0][1])  # 1 = AI ✓
 
         # ================= VIDEO XAI USING ATTENTION ROLLOUT =================
         video_gradcam_viz = None
