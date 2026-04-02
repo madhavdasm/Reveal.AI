@@ -44,44 +44,41 @@ def f32(x):
     return float(x)
 
 
-# ================== AUDIO MODEL ==================
+# ================== AUDIO MODEL (UPDATED) ==================
 class MFCC_CNN(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
 
-            nn.Conv2d(32, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
+        self.pool = nn.MaxPool2d(2)
+        self.gap = nn.AdaptiveAvgPool2d((4, 4))
 
-            nn.Conv2d(64, 128, 3, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))
-        )
-
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(128 * 4 * 4, 128),
-            nn.ReLU(),
-            nn.Linear(128, 2)
-        )
+        self.fc1 = nn.Linear(128 * 4 * 4, 128)
+        self.fc2 = nn.Linear(128, 2)
 
     def forward(self, x):
-        return self.classifier(self.features(x))
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        x = torch.relu(self.conv3(x))
+
+        x = self.gap(x)
+        x = x.view(x.size(0), -1)
+
+        x = torch.relu(self.fc1(x))
+        return self.fc2(x)
 
 
 audio_model = MFCC_CNN().to(DEVICE)
 audio_model.load_state_dict(
-    torch.load("mfcc_audio_detector.pth", map_location=DEVICE)
+    torch.load("audio_model.pth", map_location=DEVICE)
 )
 audio_model.eval()
 
 
-# ================== VIDEO MODEL ==================
+# ================== VIDEO MODEL (UNCHANGED) ==================
 class VideoSwinModel(nn.Module):
     def __init__(self, num_classes=2):
         super().__init__()
@@ -89,7 +86,6 @@ class VideoSwinModel(nn.Module):
         self.backbone = swin3d_t(weights=None)
         in_features = self.backbone.head.in_features
 
-        # FIX: matches checkpoint (head.1.weight)
         self.backbone.head = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(in_features, num_classes)
@@ -118,7 +114,7 @@ video_model.eval()
 VIDEO_THRESHOLD = checkpoint.get("threshold", 0.5) if isinstance(checkpoint, dict) else 0.5
 
 
-# ================== VIDEO LOADER (FIXED FLOAT32) ==================
+# ================== VIDEO LOADER ==================
 def load_video(path, max_frames=16):
     cap = cv2.VideoCapture(path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -169,7 +165,17 @@ def extract_audio(video_path, out_path):
 
 def extract_mfcc(audio_path):
     audio, _ = librosa.load(audio_path, sr=16000)
+
+    if len(audio) < 16000:
+        raise ValueError("Audio too short")
+
     mfcc = librosa.feature.mfcc(y=audio, sr=16000, n_mfcc=40)
+
+    if mfcc.shape[1] < 300:
+        mfcc = np.pad(mfcc, ((0, 0), (0, 300 - mfcc.shape[1])))
+    else:
+        mfcc = mfcc[:, :300]
+
     mfcc = (mfcc - mfcc.mean()) / (mfcc.std() + 1e-8)
     return mfcc
 
@@ -184,19 +190,28 @@ async def predict(file: UploadFile = File(...)):
     audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
 
     try:
-        # AUDIO
-        extract_audio(video_path, audio_path)
-        mfcc = extract_mfcc(audio_path)
+        # ===== AUDIO (SAFE) =====
+        audio_available = True
 
-        audio_x = torch.tensor(mfcc).unsqueeze(0).unsqueeze(0).float().to(DEVICE)
+        try:
+            extract_audio(video_path, audio_path)
+            mfcc = extract_mfcc(audio_path)
 
-        with torch.no_grad():
-            a_probs = torch.softmax(audio_model(audio_x), dim=1)
+            audio_x = torch.tensor(mfcc).unsqueeze(0).unsqueeze(0).float().to(DEVICE)
 
-        audio_ai = f32(a_probs[0][1])
-        audio_real = f32(a_probs[0][0])
+            with torch.no_grad():
+                a_probs = torch.softmax(audio_model(audio_x), dim=1)
 
-        # VIDEO
+            audio_ai = f32(a_probs[0][1])
+            audio_real = f32(a_probs[0][0])
+
+        except Exception as e:
+            print("Audio failed:", e)
+            audio_available = False
+            audio_ai = None
+            audio_real = None
+
+        # ===== VIDEO =====
         video_x = load_video(video_path).to(DEVICE).float()
 
         with torch.no_grad():
@@ -205,8 +220,12 @@ async def predict(file: UploadFile = File(...)):
         video_ai = f32(v_probs[0][LABEL_AI])
         video_real = f32(v_probs[0][LABEL_REAL])
 
-        # FUSION
-        final_ai = 0.6 * audio_ai + 0.4 * video_ai
+        # ===== FUSION =====
+        if audio_available:
+            final_ai = 0.4 * audio_ai + 0.6 * video_ai
+        else:
+            final_ai = video_ai
+
         final_real = 1 - final_ai
 
         prediction = "AI-GENERATED" if final_ai >= 0.5 else "REAL"
@@ -215,9 +234,11 @@ async def predict(file: UploadFile = File(...)):
             "prediction": prediction,
             "confidence": float(round(max(final_ai, final_real) * 100, 2)),
 
+            "audio_available": audio_available,
+
             "audio_model": {
-                "real_probability": float(round(audio_real, 4)),
-                "ai_probability": float(round(audio_ai, 4)),
+                "real_probability": float(round(audio_real, 4)) if audio_available else None,
+                "ai_probability": float(round(audio_ai, 4)) if audio_available else None,
             },
 
             "video_model": {
